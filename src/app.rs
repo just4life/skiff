@@ -93,6 +93,8 @@ pub struct App {
     window_title: String,
     /// Command line actions, run once the window is up.
     launch: Option<crate::cli::Launch>,
+    /// F12 overlay: frame rate, CPU time per frame and the GPU in use.
+    fps: Option<FpsMeter>,
 }
 
 impl App {
@@ -159,6 +161,7 @@ impl App {
             pending_dir: None,
             window_title: "Skiff".into(),
             launch: Some(launch),
+            fps: None,
         };
         let start = Some(app.settings.last_local_dir.clone())
             .filter(|d| !d.is_empty() && Path::new(d).is_dir())
@@ -557,6 +560,13 @@ impl App {
                         self.upload(vec![name]);
                     }
                 }
+                (Side::Local, PaneAction::OpenExternal(name)) => {
+                    let p = self.local_full(&name);
+                    if let Err(e) = crate::local::open_external(&p) {
+                        self.toast(format!("Не удалось открыть {name}: {e}"), theme::RED);
+                    }
+                }
+                (Side::Remote, PaneAction::OpenExternal(_)) => {}
                 (Side::Remote, PaneAction::Open(name)) => {
                     if let Some(e) = self.remote.entry(&name) {
                         if e.is_dir {
@@ -954,9 +964,63 @@ impl App {
     }
 }
 
+pub struct FpsMeter {
+    frames: VecDeque<Instant>,
+    cpu_ms: f32,
+    renderer: String,
+}
+
+impl App {
+    fn fps_overlay(&mut self, ctx: &egui::Context, frame: &eframe::Frame) {
+        if ctx.input(|i| i.key_pressed(egui::Key::F12)) {
+            self.fps = match self.fps {
+                Some(_) => None,
+                None => Some(FpsMeter { frames: VecDeque::new(), cpu_ms: 0.0, renderer: renderer_name(frame) }),
+            };
+        }
+        let Some(m) = &mut self.fps else { return };
+        let now = Instant::now();
+        m.frames.push_back(now);
+        while m.frames.front().is_some_and(|t| now.duration_since(*t) > Duration::from_secs(1)) {
+            m.frames.pop_front();
+        }
+        if let Some(cpu) = frame.info().cpu_usage {
+            m.cpu_ms = m.cpu_ms * 0.9 + cpu * 1000.0 * 0.1;
+        }
+        let text = format!("{} FPS · CPU {:.1} мс/кадр · {}", m.frames.len(), m.cpu_ms, m.renderer);
+        egui::Area::new(egui::Id::unique("fps"))
+            .order(egui::Order::Tooltip)
+            .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -34.0))
+            .interactable(false)
+            .show(ctx, |ui| {
+                egui::Frame::new()
+                    .fill(Color32::from_black_alpha(200))
+                    .corner_radius(6)
+                    .inner_margin(Margin::symmetric(8, 4))
+                    .show(ui, |ui| ui.label(RichText::new(text).monospace().size(12.0).color(theme::GREEN)));
+            });
+        // keep drawing so the counter shows the real ceiling, not idle frames
+        ctx.request_repaint();
+    }
+}
+
+fn renderer_name(frame: &eframe::Frame) -> String {
+    use eframe::glow::HasContext as _;
+    match frame.gl() {
+        // SAFETY: plain glGetString on the current context.
+        Some(gl) => unsafe {
+            let r = gl.get_parameter_string(eframe::glow::RENDERER);
+            let v = gl.get_parameter_string(eframe::glow::VERSION);
+            format!("OpenGL {} · {}", v.split_whitespace().next().unwrap_or(""), r)
+        },
+        None => "OpenGL".into(),
+    }
+}
+
 impl eframe::App for App {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        self.fps_overlay(&ctx, frame);
         // Run the command line after the first frames are on screen, so a
         // password prompt opens in a window that is already shown.
         if ctx.cumulative_pass_nr() >= 2

@@ -31,6 +31,8 @@ pub struct DragPayload {
 
 pub enum PaneAction {
     Open(String),
+    /// Open a local file or folder with the system's default program.
+    OpenExternal(String),
     Up,
     Back,
     Home,
@@ -58,6 +60,14 @@ pub struct Pane {
     pub history: Vec<String>,
     pub loaded: bool,
     pub suppress_history: bool,
+    /// Bumped whenever `entries` changes; keys the sorted view cache.
+    generation: u64,
+    /// Sorted and filtered rows, rebuilt only when something they depend on
+    /// changes instead of on every frame (big folders made frames slow).
+    view: std::sync::Arc<Vec<RemoteEntry>>,
+    view_key: Option<(u64, SortCol, bool, String)>,
+    /// (files, dirs, bytes) of the listing.
+    totals: (usize, usize, u64),
 }
 
 impl Pane {
@@ -76,6 +86,10 @@ impl Pane {
             history: Vec::new(),
             loaded: false,
             suppress_history: false,
+            generation: 0,
+            view: Default::default(),
+            view_key: None,
+            totals: (0, 0, 0),
         }
     }
 
@@ -97,6 +111,10 @@ impl Pane {
         self.path_edit = path.clone();
         self.path = path;
         self.entries = entries;
+        self.generation += 1;
+        let files = self.entries.iter().filter(|e| !e.is_dir).count();
+        let bytes = self.entries.iter().filter(|e| !e.is_dir).map(|e| e.size).sum();
+        self.totals = (files, self.entries.len() - files, bytes);
         self.error = None;
         self.loaded = true;
         self.suppress_history = false;
@@ -104,6 +122,8 @@ impl Pane {
 
     pub fn clear(&mut self) {
         self.entries.clear();
+        self.generation += 1;
+        self.totals = (0, 0, 0);
         self.selected.clear();
         self.path.clear();
         self.path_edit.clear();
@@ -114,6 +134,15 @@ impl Pane {
 
     pub fn entry(&self, name: &str) -> Option<&RemoteEntry> {
         self.entries.iter().find(|e| e.name == name)
+    }
+
+    fn visible_cached(&mut self) -> std::sync::Arc<Vec<RemoteEntry>> {
+        let key = (self.generation, self.sort, self.asc, self.filter.clone());
+        if self.view_key.as_ref() != Some(&key) {
+            self.view = std::sync::Arc::new(self.visible().into_iter().cloned().collect());
+            self.view_key = Some(key);
+        }
+        self.view.clone()
     }
 
     fn visible(&self) -> Vec<&RemoteEntry> {
@@ -268,16 +297,13 @@ impl Pane {
                 .corner_radius(CornerRadius { nw: 0, ne: 0, sw: 10, se: 10 })
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    let files = self.entries.iter().filter(|e| !e.is_dir).count();
-                    let dirs = self.entries.len() - files;
-                    let total: u64 = self.entries.iter().filter(|e| !e.is_dir).map(|e| e.size).sum();
+                    let (files, dirs, total) = self.totals;
                     let mut text = format!("{files} файлов и {dirs} папок · {}", theme::human_size(total));
                     if !self.selected.is_empty() {
                         let sel: u64 = self
-                            .selected
+                            .entries
                             .iter()
-                            .filter_map(|n| self.entry(n))
-                            .filter(|e| !e.is_dir)
+                            .filter(|e| !e.is_dir && self.selected.contains(&e.name))
                             .map(|e| e.size)
                             .sum();
                         text = format!("Выбрано {} · {} — {text}", self.selected.len(), theme::human_size(sel));
@@ -315,7 +341,7 @@ impl Pane {
     }
 
     fn table(&mut self, ui: &mut egui::Ui, actions: &mut Vec<PaneAction>) {
-        let visible: Vec<RemoteEntry> = self.visible().into_iter().cloned().collect();
+        let visible = self.visible_cached();
         let has_parent = !is_root(&self.path, self.side);
         let offset = usize::from(has_parent);
         let total = visible.len() + offset;
@@ -457,21 +483,33 @@ impl Pane {
                             DragPayload { from: side, names: self.selected.iter().cloned().collect() },
                         );
                     }
-                    let sel: Vec<String> = if self.selected.contains(&e.name) {
-                        self.selected.iter().cloned().collect()
-                    } else {
-                        vec![e.name.clone()]
+                    let selected_set = &self.selected;
+                    // Built only while the menu is open: cloning a large
+                    // selection for every row made each frame slow.
+                    let sel = || -> Vec<String> {
+                        if selected_set.contains(&e.name) {
+                            selected_set.iter().cloned().collect()
+                        } else {
+                            vec![e.name.clone()]
+                        }
                     };
                     r.context_menu(|ui| {
                         ui.set_min_width(190.0);
                         let transfer = if side == Side::Local { "⬆  Загрузить на сервер" } else { "⬇  Скачать" };
                         if ui.button(transfer).clicked() {
-                            actions.push(PaneAction::Transfer(sel.clone()));
+                            actions.push(PaneAction::Transfer(sel()));
                             ui.close();
                         }
                         if e.is_dir && ui.button("📂  Открыть").clicked() {
                             actions.push(PaneAction::Open(e.name.clone()));
                             ui.close();
+                        }
+                        if side == Side::Local {
+                            let label = if e.is_dir { "↗  Открыть в проводнике" } else { "↗  Открыть" };
+                            if ui.button(label).clicked() {
+                                actions.push(PaneAction::OpenExternal(e.name.clone()));
+                                ui.close();
+                            }
                         }
                         ui.separator();
                         if ui.button("✏  Переименовать        F2").clicked() {
@@ -486,7 +524,7 @@ impl Pane {
                             .button(RichText::new("🗑  Удалить                  Del").color(theme::RED))
                             .clicked()
                         {
-                            actions.push(PaneAction::Delete(sel.clone()));
+                            actions.push(PaneAction::Delete(sel()));
                             ui.close();
                         }
                         ui.separator();

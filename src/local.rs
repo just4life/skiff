@@ -102,3 +102,17 @@ pub fn delete(path: &Path) -> Result<()> {
     }
     Ok(())
 }
+
+/// Opens a file or folder with the program the OS associates with it.
+pub fn open_external(path: &Path) -> std::io::Result<()> {
+    use std::process::Command;
+    #[cfg(target_os = "windows")]
+    // Explorer opens a file with its associated program and a folder in a
+    // new window, without cmd's quoting pitfalls (&, ^, %).
+    let child = Command::new("explorer.exe").arg(path).spawn();
+    #[cfg(target_os = "macos")]
+    let child = Command::new("open").arg(path).spawn();
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let child = Command::new("xdg-open").arg(path).spawn();
+    child.map(|_| ())
+}
