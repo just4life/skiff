@@ -151,20 +151,26 @@ impl Site {
             }
             rest = r;
         }
-        let (hostpart, path) = match rest.find('/') {
-            Some(i) => (&rest[..i], Some(rest[i..].to_string())),
-            None => (rest, None),
-        };
-        let hostpart = if let Some((user, h)) = hostpart.rsplit_once('@') {
-            if let Some((u, p)) = user.split_once(':') {
-                self.user = u.to_string();
-                self.password = p.to_string();
+        // Userinfo ends at the last '@'. Normally that '@' comes before the
+        // first '/', but a raw '/' in the password (sftp://u:a/b@host) is
+        // accepted too, as long as the part before the '@' looks like user:pass.
+        let first_slash = rest.find('/').unwrap_or(rest.len());
+        let at = rest[..first_slash]
+            .rfind('@')
+            .or_else(|| rest.rfind('@').filter(|&i| rest[..i].contains(':')));
+        if let Some(at) = at {
+            let userinfo = &rest[..at];
+            rest = &rest[at + 1..];
+            if let Some((u, p)) = userinfo.split_once(':') {
+                self.user = percent_decode(u);
+                self.password = percent_decode(p);
             } else {
-                self.user = user.to_string();
+                self.user = percent_decode(userinfo);
             }
-            h
-        } else {
-            hostpart
+        }
+        let (hostpart, path) = match rest.find('/') {
+            Some(i) => (&rest[..i], Some(percent_decode(&rest[i..]))),
+            None => (rest, None),
         };
         // IPv6 literal in brackets
         if let Some(stripped) = hostpart.strip_prefix('[') {
@@ -184,6 +190,29 @@ impl Site {
         }
         path
     }
+}
+
+/// Decodes %XX escapes (as in URLs); invalid escapes are kept as typed.
+pub fn percent_decode(s: &str) -> String {
+    if !s.contains('%') {
+        return s.to_string();
+    }
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%'
+            && i + 2 < b.len()
+            && let Ok(v) = u8::from_str_radix(std::str::from_utf8(&b[i + 1..i + 3]).unwrap_or("zz"), 16)
+        {
+            out.push(v);
+            i += 3;
+        } else {
+            out.push(b[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).unwrap_or_else(|_| s.to_string())
 }
 
 mod obfuscated {
@@ -552,6 +581,28 @@ mod tests {
         assert_eq!(s.host, "example.com");
         assert_eq!(s.port, 2121);
         assert_eq!(p.as_deref(), Some("/pub"));
+
+        let mut s = Site::default();
+        s.apply_host_url("sftp://root:пароль@10.0.0.5");
+        assert_eq!((s.protocol, s.user.as_str(), s.password.as_str(), s.host.as_str()), (Protocol::Sftp, "root", "пароль", "10.0.0.5"));
+
+        let mut s = Site::default();
+        let p = s.apply_host_url("sftp://admin:p%40ss%3Aw%2Frd%25@[::1]:2222/var/www");
+        assert_eq!((s.user.as_str(), s.password.as_str(), s.host.as_str(), s.port), ("admin", "p@ss:w/rd%", "::1", 2222));
+        assert_eq!(p.as_deref(), Some("/var/www"));
+
+        // raw '@' and '/' in the password still work
+        let mut s = Site::default();
+        let p = s.apply_host_url("sftp://root:a/b@c@host/data");
+        assert_eq!((s.password.as_str(), s.host.as_str()), ("a/b@c", "host"));
+        assert_eq!(p.as_deref(), Some("/data"));
+
+        // '@' inside the path is not userinfo
+        let mut s = Site::default();
+        let p = s.apply_host_url("ftp://host/mail/a@b");
+        assert_eq!((s.user.as_str(), s.host.as_str()), ("", "host"));
+        assert_eq!(p.as_deref(), Some("/mail/a@b"));
+        assert_eq!(percent_decode("100%"), "100%");
     }
 
     #[test]

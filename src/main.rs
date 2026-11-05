@@ -5,6 +5,7 @@
 #![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
 
 mod app;
+mod cli;
 mod config;
 mod events;
 mod icon;
@@ -17,6 +18,21 @@ mod trust;
 mod ui;
 
 fn main() -> eframe::Result {
+    let launch = match cli::parse(std::env::args().skip(1)) {
+        cli::Parsed::Run(l) => l,
+        cli::Parsed::Help => {
+            cli::show(cli::HELP, false);
+            return Ok(());
+        }
+        cli::Parsed::Version => {
+            cli::show(&format!("Skiff {}", env!("CARGO_PKG_VERSION")), false);
+            return Ok(());
+        }
+        cli::Parsed::Error(e) => {
+            cli::show(&format!("Ошибка: {e}\n\n{}", cli::HELP), true);
+            std::process::exit(2);
+        }
+    };
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Skiff")
@@ -28,5 +44,5 @@ fn main() -> eframe::Result {
         renderer: eframe::Renderer::Glow,
         ..Default::default()
     };
-    eframe::run_native("Skiff", options, Box::new(|cc| Ok(Box::new(app::App::new(cc)))))
+    eframe::run_native("Skiff", options, Box::new(move |cc| Ok(Box::new(app::App::new(cc, launch)))))
 }

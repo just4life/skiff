@@ -91,10 +91,12 @@ pub struct App {
     local_refresh: bool,
     pending_dir: Option<String>,
     window_title: String,
+    /// Command line actions, run once the window is up.
+    launch: Option<crate::cli::Launch>,
 }
 
 impl App {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, launch: crate::cli::Launch) -> Self {
         theme::install(&cc.egui_ctx);
         let settings = config::load_settings();
         if settings.ui_scale > 0.5 && (settings.ui_scale - 1.0).abs() > 0.01 {
@@ -156,6 +158,7 @@ impl App {
             local_refresh: false,
             pending_dir: None,
             window_title: "Skiff".into(),
+            launch: Some(launch),
         };
         let start = Some(app.settings.last_local_dir.clone())
             .filter(|d| !d.is_empty() && Path::new(d).is_dir())
@@ -164,6 +167,45 @@ impl App {
         app.navigate_local(&start);
         app.push_log(LogLevel::Info, format!("Skiff {} готов к работе", env!("CARGO_PKG_VERSION")));
         app
+    }
+
+    /// Acts on the command line: open a local folder, then connect to a
+    /// saved site or to the URL.
+    fn apply_launch(&mut self, launch: crate::cli::Launch) {
+        if let Some(dir) = launch.local {
+            if Path::new(&dir).is_dir() {
+                self.navigate_local(&dir);
+            } else {
+                self.toast(format!("Локальная папка не найдена: {dir}"), theme::YELLOW);
+            }
+        }
+        if let Some(name) = launch.site {
+            match self.find_site(&name) {
+                Some(site) => self.connect(site),
+                None => self.toast(format!("Сайт «{name}» не найден в менеджере сайтов"), theme::RED),
+            }
+        } else if let Some(url) = launch.url {
+            // The URL alone decides who we log in as: start from a clean form.
+            self.quick.user.clear();
+            self.quick.password.clear();
+            self.quick_port.clear();
+            self.quick_host = url;
+            self.quick_connect_inner(true);
+        }
+    }
+
+    /// Finds a saved site by "Name", "Group/Name" or FileZilla's "0/Group/Name".
+    fn find_site(&self, spec: &str) -> Option<Site> {
+        let spec = spec.trim().trim_start_matches("0/").trim_matches('/');
+        let full = |s: &Site| {
+            if s.group.is_empty() { s.name.clone() } else { format!("{}/{}", s.group.trim_matches('/'), s.name) }
+        };
+        self.sites
+            .iter()
+            .find(|s| full(s) == spec)
+            .or_else(|| self.sites.iter().find(|s| s.name == spec))
+            .or_else(|| self.sites.iter().find(|s| full(s).eq_ignore_ascii_case(spec) || s.name.to_lowercase() == spec.to_lowercase()))
+            .cloned()
     }
 
     // ---------------------------------------------------------------------
@@ -287,6 +329,12 @@ impl App {
     }
 
     pub fn quick_connect(&mut self) {
+        self.quick_connect_inner(false);
+    }
+
+    /// `ask_password`: prompt when the URL names a user but no password
+    /// (command line), instead of trying an empty one.
+    fn quick_connect_inner(&mut self, ask_password: bool) {
         let mut site = self.quick.clone();
         let path = site.apply_host_url(&self.quick_host.clone());
         if let Ok(p) = self.quick_port.trim().parse::<u16>() {
@@ -305,6 +353,7 @@ impl App {
         // sync parsed values back into the form
         self.quick.protocol = site.protocol;
         self.quick.user = site.user.clone();
+        self.quick.password = site.password.clone();
         self.quick_host = site.host.clone();
         if site.port != 0 {
             self.quick_port = site.port.to_string();
@@ -315,7 +364,9 @@ impl App {
         self.settings.quick_port = self.quick_port.clone();
         self.settings.quick_password = self.quick.password.clone();
         self.save_settings();
-        site.remember_password = true; // the password field is right there
+        // The password field is right there, so an empty one is meant as empty
+        // unless we came from the command line.
+        site.remember_password = !(ask_password && site.password.is_empty());
         self.connect(site);
     }
 
@@ -906,6 +957,16 @@ impl App {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        // Run the command line after the first frames are on screen, so a
+        // password prompt opens in a window that is already shown.
+        if ctx.cumulative_pass_nr() >= 2
+            && let Some(launch) = self.launch.take()
+        {
+            self.apply_launch(launch);
+        }
+        if self.launch.is_some() {
+            ctx.request_repaint();
+        }
         self.process_events();
         if self.remote_refresh_at.is_some() {
             ctx.request_repaint_after(Duration::from_millis(100));

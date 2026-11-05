@@ -72,8 +72,18 @@ fn run(
     let start = initial_dir
         .filter(|d| !d.trim().is_empty())
         .unwrap_or_else(|| home.clone());
-    notify.send(AppEvent::Connected { session: id, home });
-    list(id, &mut *fs, &start, &notify);
+    notify.send(AppEvent::Connected { session: id, home: home.clone() });
+    if start == home || !try_list(id, &mut *fs, &start, &notify) {
+        // Like FileZilla: a start folder that does not exist is not fatal.
+        // Try it relative to home ("/www" → "/home/user/www"), then home.
+        let relative = remote::join(&home, start.trim_start_matches('/'));
+        if start == home || relative == start || !try_list(id, &mut *fs, &relative, &notify) {
+            if start != home {
+                notify.send(AppEvent::Log(LogLevel::Info, format!("Папка {start} не найдена, открываю домашнюю")));
+            }
+            list(id, &mut *fs, &home, &notify);
+        }
+    }
     notify.send(AppEvent::Busy { session: id, busy: false });
 
     loop {
@@ -127,6 +137,17 @@ fn run(
             notify.send(AppEvent::OpFailed { session: id, message });
         }
         notify.send(AppEvent::Busy { session: id, busy: false });
+    }
+}
+
+/// Lists `path` without reporting a failure.
+fn try_list(id: u64, fs: &mut dyn RemoteFs, path: &str, notify: &Notifier) -> bool {
+    match fs.list(path) {
+        Ok(entries) => {
+            notify.send(AppEvent::Listing { session: id, path: path.to_string(), entries });
+            true
+        }
+        Err(_) => false,
     }
 }
 

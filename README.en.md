@@ -30,6 +30,19 @@
 - **File exists:** ask / overwrite / if newer / resume (REST/APPE, SFTP seek) / rename / skip, with "apply to all".
 - **Robust:** keep-alive, automatic reconnect, PASV NAT workaround, EPSV for IPv6, MLSD with LIST fallback, UTF-8.
 
+## Command line
+
+Connect right at startup, like FileZilla:
+
+```bash
+skiff sftp://root:password@192.168.1.10
+skiff --site "Group/Site name" --local ~/projects
+```
+
+`-c/--site` connects to a saved site (`Name`, `Group/Name` or FileZilla's `0/Group/Name`),
+`-a/--local` opens a local folder, `-h/--help` prints help. Escape special characters in the
+password URL-style (`@` → `%40`).
+
 ## Build
 
 Rust 1.88+ (edition 2024):
