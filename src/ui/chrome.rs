@@ -71,8 +71,23 @@ impl App {
                     }
                 });
             let mut enter = false;
+            // Lay the row out from what is actually left, so nothing overlaps
+            // in a narrow window: the right-hand buttons get reserved space,
+            // fields shrink first and the buttons go icon-only last.
             let w = ui.available_width();
-            let host_w = (w - 560.0).clamp(140.0, 320.0);
+            let connected = self.conn != ConnState::Disconnected;
+            let gap = ui.spacing().item_spacing.x;
+            let compact = w < 760.0;
+            let connect_w = if compact { 36.0 } else { 140.0 };
+            let disconnect_w = match (connected, compact) {
+                (false, _) => 0.0,
+                (true, true) => 36.0 + gap,
+                (true, false) => 130.0 + gap,
+            };
+            let reserve = 36.0 + gap + disconnect_w + 8.0;
+            let fields = (w - reserve - 58.0 - connect_w - 5.0 * gap).max(150.0);
+            let host_w = (fields * 0.44).clamp(70.0, 320.0);
+            let cred_w = (fields * 0.28).clamp(40.0, 140.0);
             let r = ui.add_sized(
                 [host_w, h],
                 egui::TextEdit::singleline(&mut self.quick_host)
@@ -81,12 +96,12 @@ impl App {
             );
             enter |= r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             let r = ui.add_sized(
-                [120.0, h],
+                [cred_w, h],
                 egui::TextEdit::singleline(&mut self.quick.user).hint_text("Пользователь").margin(Margin::symmetric(8, 6)),
             );
             enter |= r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             let r = ui.add_sized(
-                [120.0, h],
+                [cred_w, h],
                 egui::TextEdit::singleline(&mut self.quick.password)
                     .password(true)
                     .hint_text("Пароль")
@@ -101,10 +116,13 @@ impl App {
             enter |= r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             let go = ui
                 .add(
-                    egui::Button::new(RichText::new("⚡ Подключиться").color(Color32::WHITE).strong())
-                        .fill(ACCENT)
-                        .min_size(egui::vec2(0.0, h)),
+                    egui::Button::new(
+                        RichText::new(if compact { "⚡" } else { "⚡ Подключиться" }).color(Color32::WHITE).strong(),
+                    )
+                    .fill(ACCENT)
+                    .min_size(egui::vec2(0.0, h)),
                 )
+                .on_hover_text("Подключиться (Enter)")
                 .clicked();
             if go || enter {
                 self.quick_connect();
@@ -128,11 +146,15 @@ impl App {
                         ui.close();
                     }
                 });
-                if self.conn != ConnState::Disconnected {
-                    let r = ui.add(
-                        egui::Button::new(RichText::new("⏏ Отключиться").color(theme::RED))
+                if connected {
+                    let r = ui
+                        .add(
+                            egui::Button::new(
+                                RichText::new(if compact { "⏏" } else { "⏏ Отключиться" }).color(theme::RED),
+                            )
                             .min_size(egui::vec2(0.0, h)),
-                    );
+                        )
+                        .on_hover_text("Отключиться");
                     if r.clicked() {
                         self.disconnect(true);
                     }
@@ -499,7 +521,13 @@ impl App {
                         if ok {
                             let mut s = (**site).clone();
                             s.password = password.clone();
-                            s.remember_password = true; // only in memory for this session
+                            s.remember_password = true;
+                            // remember it for next time (saved sites only)
+                            if let Some(stored) = self.sites.iter_mut().find(|x| x.id == s.id && s.id != 0) {
+                                stored.password = s.password.clone();
+                                stored.remember_password = true;
+                                self.save_sites();
+                            }
                             keep = false;
                             self.dialog = None;
                             self.connect(s);
@@ -533,11 +561,13 @@ impl App {
                         }
                         ui.end_row();
                         ui.label("Масштаб интерфейса");
-                        if ui
-                            .add(egui::Slider::new(&mut self.settings.ui_scale, 0.75..=1.75).step_by(0.05))
-                            .changed()
-                        {
+                        // Applied when the slider is released: rescaling while
+                        // dragging moves the slider out from under the cursor.
+                        let r = ui.add(egui::Slider::new(&mut self.settings.ui_scale, 0.75..=1.75).step_by(0.05));
+                        let released = r.drag_stopped() || (r.changed() && !r.dragged());
+                        if released && (ctx.zoom_factor() - self.settings.ui_scale).abs() > 0.001 {
                             ctx.set_zoom_factor(self.settings.ui_scale);
+                            self.save_settings();
                         }
                         ui.end_row();
                     });

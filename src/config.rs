@@ -243,6 +243,9 @@ pub struct Settings {
     pub quick_host: String,
     pub quick_user: String,
     pub quick_port: String,
+    /// Quickconnect password, base64-obfuscated like site passwords.
+    #[serde(with = "obfuscated")]
+    pub quick_password: String,
     pub ui_scale: f32,
     pub split: f32,
     pub bottom_h: f32,
@@ -259,6 +262,7 @@ impl Default for Settings {
             quick_host: String::new(),
             quick_user: String::new(),
             quick_port: String::new(),
+            quick_password: String::new(),
             ui_scale: 1.0,
             split: 0.5,
             bottom_h: 230.0,

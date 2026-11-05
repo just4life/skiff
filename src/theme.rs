@@ -196,3 +196,34 @@ pub fn file_icon(name: &str, is_dir: bool, is_link: bool) -> (&'static str, Colo
         _ => (if is_link { "🔗" } else { "🗋" }, TEXT_WEAK),
     }
 }
+
+/// Hand-drawn folder icon (crisper than any emoji glyph, same on every OS).
+pub fn folder_icon(ui: &mut egui::Ui, open_link: bool) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(18.0, 16.0), egui::Sense::hover());
+    paint_folder(ui.painter(), rect, open_link);
+    resp
+}
+
+pub fn paint_folder(p: &egui::Painter, rect: egui::Rect, link: bool) {
+    let r = egui::Rect::from_center_size(rect.center(), egui::vec2(16.0, 13.0));
+    let back = Color32::from_rgb(0xd9, 0x9a, 0x2b);
+    let front_top = Color32::from_rgb(0xff, 0xd0, 0x66);
+    // tab
+    let tab = egui::Rect::from_min_size(r.min, egui::vec2(7.0, 4.0));
+    p.rect_filled(tab, CornerRadius { nw: 2, ne: 2, sw: 0, se: 0 }, back);
+    // back sheet
+    let body = egui::Rect::from_min_max(egui::pos2(r.min.x, r.min.y + 2.0), r.max);
+    p.rect_filled(body, CornerRadius::same(2), back);
+    // front sheet
+    let front = egui::Rect::from_min_max(egui::pos2(r.min.x, r.min.y + 4.5), r.max);
+    p.rect_filled(front, CornerRadius::same(2), front_top);
+    p.line_segment(
+        [egui::pos2(front.min.x + 1.0, front.min.y + 0.5), egui::pos2(front.max.x - 1.0, front.min.y + 0.5)],
+        Stroke::new(1.0, Color32::from_rgb(0xff, 0xe2, 0x9a)),
+    );
+    if link {
+        let c = egui::pos2(r.max.x - 3.5, r.max.y - 3.5);
+        p.circle_filled(c, 3.2, BG1);
+        p.text(c, egui::Align2::CENTER_CENTER, "↗", FontId::proportional(8.0), CYAN);
+    }
+}

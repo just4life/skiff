@@ -119,6 +119,7 @@ impl App {
             name: "Быстрое подключение".into(),
             protocol: settings.quick_protocol,
             user: settings.quick_user.clone(),
+            password: settings.quick_password.clone(),
             remember_password: false,
             ..Default::default()
         };
@@ -312,6 +313,7 @@ impl App {
         self.settings.quick_host = self.quick_host.clone();
         self.settings.quick_user = site.user.clone();
         self.settings.quick_port = self.quick_port.clone();
+        self.settings.quick_password = self.quick.password.clone();
         self.save_settings();
         site.remember_password = true; // the password field is right there
         self.connect(site);

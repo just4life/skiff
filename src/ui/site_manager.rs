@@ -172,7 +172,10 @@ impl App {
                                 if last_group.as_deref() != Some(s.group.as_str()) {
                                     if !s.group.is_empty() {
                                         ui.add_space(4.0);
-                                        ui.label(RichText::new(format!("📁 {}", s.group)).size(12.0).color(theme::FOLDER));
+                                        ui.horizontal(|ui| {
+                                            theme::folder_icon(ui, false);
+                                            ui.label(RichText::new(&s.group).size(12.0).color(theme::FOLDER));
+                                        });
                                     }
                                     last_group = Some(s.group.clone());
                                 }

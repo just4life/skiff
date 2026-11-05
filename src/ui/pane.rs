@@ -162,6 +162,10 @@ impl Pane {
         ));
         let resp = frame.show(ui, |ui| {
             ui.set_min_size(ui.available_size());
+            // Table row highlights extend by half the item spacing; keep them
+            // inside the card's border.
+            let clip = ui.max_rect().shrink(1.0).intersect(ui.clip_rect());
+            ui.set_clip_rect(clip);
             // ---- header ------------------------------------------------------
             egui::Frame::new()
                 .inner_margin(Margin { left: 12, right: 10, top: 10, bottom: 6 })
@@ -366,7 +370,7 @@ impl Pane {
                     if has_parent && idx == 0 {
                         row.col(|ui| {
                             ui.add_space(6.0);
-                            ui.label(RichText::new("📁").color(theme::FOLDER));
+                            theme::folder_icon(ui, false);
                             ui.label(RichText::new("..").color(TEXT));
                         });
                         row.col(|_| {});
@@ -387,8 +391,12 @@ impl Pane {
                     row.set_selected(selected);
                     row.col(|ui| {
                         ui.add_space(6.0);
-                        let (icon, color) = theme::file_icon(&e.name, e.is_dir, e.is_link);
-                        ui.label(RichText::new(icon).color(color));
+                        if e.is_dir {
+                            theme::folder_icon(ui, e.is_link);
+                        } else {
+                            let (icon, color) = theme::file_icon(&e.name, e.is_dir, e.is_link);
+                            ui.add_sized([18.0, 16.0], egui::Label::new(RichText::new(icon).color(color)));
+                        }
                         let mut t = RichText::new(&e.name).color(if selected { theme::TEXT_STRONG } else { TEXT });
                         if e.is_dir {
                             t = t.strong();
