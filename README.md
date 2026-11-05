@@ -1,10 +1,57 @@
-# Skiff
+<p align="center">
+  <img src="assets/icon.png" width="96" alt="Skiff">
+</p>
 
-Быстрый и аккуратный FTP / FTPS / SFTP клиент на чистом Rust с современным тёмным интерфейсом.
-Повторяет основной сценарий работы FileZilla — менеджер сайтов, две панели, очередь передач —
-без лишнего.
+<h1 align="center">Skiff</h1>
+
+<p align="center">
+  <b>Быстрый FTP / FTPS / SFTP клиент на чистом Rust с современным тёмным интерфейсом</b><br>
+  Две панели, менеджер сайтов, очередь передач. Всё, что нужно от FileZilla, и ничего лишнего.
+</p>
+
+<p align="center">
+  <a href="https://github.com/just4life/skiff/actions/workflows/build.yml"><img src="https://github.com/just4life/skiff/actions/workflows/build.yml/badge.svg" alt="build"></a>
+  <a href="https://github.com/just4life/skiff/releases/latest"><img src="https://img.shields.io/github/v/release/just4life/skiff?color=6d8dff" alt="release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-8b5cf6" alt="license"></a>
+  <img src="https://img.shields.io/badge/rust-2024-orange?logo=rust" alt="rust 2024">
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey" alt="platforms">
+</p>
+
+<p align="center">
+  <a href="https://github.com/just4life/skiff/releases/latest"><b>⬇ Скачать</b></a> ·
+  <a href="#возможности">Возможности</a> ·
+  <a href="#сборка">Сборка</a> ·
+  <a href="README.en.md">English</a>
+</p>
 
 ![Skiff](docs/screenshot-main.png)
+
+<table>
+  <tr>
+    <td><img src="docs/screenshot-site-manager.png" alt="Менеджер сайтов"></td>
+    <td><img src="docs/screenshot-transfer.png" alt="Очередь передач"></td>
+  </tr>
+  <tr>
+    <td align="center">Менеджер сайтов с импортом из FileZilla</td>
+    <td align="center">Параллельные передачи с прогрессом и скоростью</td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshot-exists.png" alt="Файл уже существует"></td>
+    <td><img src="docs/screenshot-certificate.png" alt="Проверка сертификата"></td>
+  </tr>
+  <tr>
+    <td align="center">«Файл уже существует»: перезаписать, докачать, пропустить</td>
+    <td align="center">Отпечатки ключей SSH и сертификатов TLS</td>
+  </tr>
+</table>
+
+## Установка
+
+Готовые сборки для Windows и Linux лежат на странице [Releases](https://github.com/just4life/skiff/releases/latest).
+Это один исполняемый файл без установщика и зависимостей.
+
+> Windows может показать предупреждение SmartScreen, потому что exe не подписан.
+> Нажмите «Подробнее» и «Выполнить в любом случае».
 
 ## Возможности
 
@@ -103,10 +150,17 @@ SKIFF_IT="ftp://u:p@host/tmp ftpes://u:p@host/tmp ftps://u:p@host:990/tmp sftp:/
 
 ## Связь с FileZilla
 
-Skiff — не построчный перевод исходников FileZilla (это ~200 тыс. строк C++/wxWidgets), а новая
+Skiff — не построчный перевод исходников FileZilla, а новая
 реализация её основного функционала на Rust с опорой на поведение оригинала: формат
 `sitemanager.xml`, обход NAT для PASV, отдельные соединения для передач, повторное использование
 TLS-сессий в FTPS, диалог «файл существует», подтверждение ключей хоста.
+
+| | FileZilla 3.71 | Skiff |
+|---|---|---|
+| Язык | C++ / wxWidgets | Rust / egui |
+| Строк кода (без пустых) | ~89 тыс. клиент + ~35 тыс. libfilezilla | ~5,4 тыс. |
+| Протоколы | FTP, FTPS, SFTP, Storj (S3 и др. — в Pro) | FTP, FTPS, SFTP |
+| Размер | установщик + DLL | один файл ~19 МБ |
 
 ## Лицензия
 

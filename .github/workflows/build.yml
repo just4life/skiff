@@ -6,6 +6,9 @@ on:
     tags: ["v*"]
   pull_request:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
@@ -14,13 +17,13 @@ jobs:
         include:
           - os: ubuntu-latest
             artifact: skiff-linux-x86_64
-            bin: target/release/skiff
+            bin: skiff
           - os: windows-latest
             artifact: skiff-windows-x86_64
-            bin: target/release/skiff.exe
+            bin: skiff.exe
           - os: macos-latest
             artifact: skiff-macos-arm64
-            bin: target/release/skiff
+            bin: skiff
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -34,7 +37,28 @@ jobs:
       - run: cargo clippy --release -- -D warnings
       - run: cargo test --release
       - run: cargo build --release
+      - name: Package
+        shell: bash
+        run: |
+          mkdir dist
+          cp target/release/${{ matrix.bin }} dist/
+          cd dist
+          if [ "$RUNNER_OS" = "Windows" ]; then 7z a ../${{ matrix.artifact }}.zip ${{ matrix.bin }}; else zip ../${{ matrix.artifact }}.zip ${{ matrix.bin }}; fi
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: ${{ matrix.bin }}
+          path: ${{ matrix.artifact }}.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip
+          generate_release_notes: true

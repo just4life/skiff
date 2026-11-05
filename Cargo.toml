@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 description = "Fast, modern FTP/FTPS/SFTP client written in pure Rust"
+repository = "https://github.com/just4life/skiff"
+readme = "README.md"
+keywords = ["ftp", "sftp", "ftps", "file-transfer", "gui"]
+categories = ["network-programming", "gui"]
 
 [profile.release]
 lto = "thin"
