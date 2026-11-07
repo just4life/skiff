@@ -4,11 +4,11 @@ use egui::{Align, Color32, Layout, Margin, RichText};
 use egui_extras::{Column, TableBuilder};
 
 use crate::app::{App, BottomTab, ConnState, Dialog};
-use crate::config::{ExistsAction, Protocol};
+use crate::config::{ExistsAction, ProgressStyle, Protocol};
 use crate::events::ExistsAnswer;
 use crate::remote::LogLevel;
 use crate::theme::{self, ACCENT, BG2, TEXT_WEAK};
-use crate::transfer::{Direction, MAX_SEGMENTS, Status};
+use crate::transfer::{Direction, MAX_SEGMENTS, Part, Status};
 use crate::trust::{TrustDecision, TrustKind};
 use crate::ui::pane::Side;
 use crate::ui::site_manager::SiteManager;
@@ -305,6 +305,7 @@ impl App {
                 .cloned()
                 .collect()
         };
+        let style = self.settings.progress_style;
         if items.iter().any(|i| i.status == Status::Active) {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(150));
         }
@@ -330,7 +331,7 @@ impl App {
             .column(Column::exact(34.0))
             .column(Column::remainder().at_least(200.0).clip(true))
             .column(Column::initial(80.0))
-            .column(Column::initial(230.0).at_least(140.0).clip(true))
+            .column(Column::initial(300.0).at_least(140.0).clip(true))
             .column(Column::exact(40.0))
             .header(22.0, |mut h| {
                 h.col(|_| {});
@@ -376,21 +377,7 @@ impl App {
                         }
                     });
                     row.col(|ui| match &it.status {
-                        Status::Active if !it.is_dir => {
-                            let f = it.fraction();
-                            ui.add(
-                                egui::ProgressBar::new(f)
-                                    .desired_width(ui.available_width() - 6.0)
-                                    .desired_height(18.0)
-                                    .fill(ACCENT)
-                                    .corner_radius(5)
-                                    .text(
-                                        RichText::new(format!("{:.0}%  ·  {}", f * 100.0, theme::human_speed(it.speed())))
-                                            .size(11.5)
-                                            .color(Color32::WHITE),
-                                    ),
-                            );
-                        }
+                        Status::Active if !it.is_dir => progress_cell(ui, it, style),
                         Status::Active => {
                             ui.add(egui::Spinner::new().size(14.0));
                             ui.label(RichText::new("чтение каталога…").size(12.0).color(TEXT_WEAK));
@@ -565,6 +552,16 @@ impl App {
                             self.transfers.queue.lock().unwrap().segments = self.settings.segments;
                         }
                         ui.end_row();
+                        ui.label("Прогресс передачи");
+                        egui::ComboBox::from_id_salt("progress_style")
+                            .selected_text(self.settings.progress_style.label())
+                            .width(220.0)
+                            .show_ui(ui, |ui| {
+                                for s in ProgressStyle::ALL {
+                                    ui.selectable_value(&mut self.settings.progress_style, s, s.label());
+                                }
+                            });
+                        ui.end_row();
                         ui.label("Скрытые локальные файлы");
                         if ui.checkbox(&mut self.settings.show_hidden_local, "показывать").changed() {
                             let p = self.local.path.clone();
@@ -731,4 +728,153 @@ impl App {
             }
         }
     }
+}
+
+fn progress_cell(ui: &mut egui::Ui, it: &crate::transfer::Item, style: ProgressStyle) {
+    match style {
+        ProgressStyle::Dots => dots_bar(ui, it),
+        ProgressStyle::Bar if it.parts.len() > 1 => segmented_bar(ui, it),
+        ProgressStyle::Bar => {
+            let f = it.fraction();
+            ui.add(
+                egui::ProgressBar::new(f)
+                    .desired_width(ui.available_width() - 6.0)
+                    .desired_height(18.0)
+                    .fill(ACCENT)
+                    .corner_radius(5)
+                    .text(RichText::new(progress_text(it)).size(11.5).color(Color32::WHITE)),
+            );
+        }
+    }
+}
+
+fn progress_text(it: &crate::transfer::Item) -> String {
+    let mut s = format!("{:.0}%  ·  {}", it.fraction() * 100.0, theme::human_speed(it.speed()));
+    if it.parts.len() > 1 {
+        s += &format!("  ·  {}", crate::transfer::threads(it.parts.len()));
+    }
+    s
+}
+
+/// The ranges to draw: the real parts of a segmented transfer, or one range
+/// for an ordinary one.
+fn display_parts(it: &crate::transfer::Item) -> Vec<Part> {
+    if it.parts.is_empty() {
+        vec![Part { start: 0, end: it.size, pos: it.transferred.min(it.size) }]
+    } else {
+        it.parts.clone()
+    }
+}
+
+/// Bytes of `lo..hi` that are already on disk.
+fn covered(parts: &[Part], lo: u64, hi: u64) -> u64 {
+    // Data before the first range was there before this run (resume).
+    let mut got = parts.first().map_or(0, |p| p.start.clamp(lo, hi) - lo);
+    for p in parts {
+        let (a, b) = (p.start.max(lo), p.pos.min(hi));
+        if b > a {
+            got += b - a;
+        }
+    }
+    got
+}
+
+fn draw_label(painter: &egui::Painter, rect: egui::Rect, text: String) {
+    let galley = painter.layout_no_wrap(text, egui::FontId::proportional(11.5), Color32::WHITE);
+    let pos = egui::pos2(rect.left() + 8.0, rect.center().y - galley.size().y / 2.0);
+    painter.galley_with_override_text_color(pos + egui::vec2(1.0, 1.0), galley.clone(), Color32::from_black_alpha(220));
+    painter.galley(pos, galley, Color32::WHITE);
+}
+
+fn parts_tooltip(resp: egui::Response, parts: &[Part]) {
+    if parts.len() < 2 {
+        return;
+    }
+    resp.on_hover_ui(|ui| {
+        for (i, p) in parts.iter().enumerate() {
+            let len = p.end.saturating_sub(p.start).max(1);
+            let got = p.pos.saturating_sub(p.start).min(len);
+            ui.label(format!(
+                "Поток {}: {:.0}%  ({} из {})",
+                i + 1,
+                got as f64 / len as f64 * 100.0,
+                theme::human_size(got),
+                theme::human_size(len)
+            ));
+        }
+    });
+}
+
+/// Progress bar of a segmented transfer: every connection fills its own
+/// stretch of the file, so with 4 threads the bar grows in 4 places.
+fn segmented_bar(ui: &mut egui::Ui, it: &crate::transfer::Item) {
+    let width = (ui.available_width() - 6.0).max(40.0);
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, 18.0), egui::Sense::hover());
+    let painter = ui.painter_at(rect);
+    let parts = display_parts(it);
+    let size = it.size.max(1) as f64;
+    let x = |b: u64| rect.left() + (b.min(it.size) as f64 / size) as f32 * rect.width();
+    painter.rect_filled(rect, 5.0, BG2);
+    if let Some(first) = parts.first()
+        && first.start > 0
+    {
+        let r = egui::Rect::from_x_y_ranges(rect.left()..=x(first.start), rect.y_range());
+        painter.rect_filled(r, 0.0, theme::ACCENT_DIM);
+    }
+    for p in &parts {
+        let color = if p.pos >= p.end { theme::GREEN } else { ACCENT };
+        painter.rect_filled(egui::Rect::from_x_y_ranges(x(p.start)..=x(p.pos), rect.y_range()), 0.0, color);
+        if p.start > 0 {
+            let sx = x(p.start);
+            painter.line_segment(
+                [egui::pos2(sx, rect.top()), egui::pos2(sx, rect.bottom())],
+                egui::Stroke::new(1.0, theme::BG0),
+            );
+        }
+    }
+    painter.rect_stroke(rect, 5.0, egui::Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Inside);
+    draw_label(&painter, rect, progress_text(it));
+    parts_tooltip(resp, &parts);
+}
+
+/// Grid of dots, one per block of the file, like a torrent client's piece
+/// map. Blocks are numbered column by column, so each connection's range
+/// is a vertical band that lights up from left to right.
+fn dots_bar(ui: &mut egui::Ui, it: &crate::transfer::Item) {
+    const ROWS: usize = 3;
+    const PITCH: f32 = 5.0;
+    const DOT: f32 = 3.5;
+    const TEXT_H: f32 = 14.0;
+    let width = (ui.available_width() - 6.0).max(40.0);
+    let (cell, resp) = ui.allocate_exact_size(egui::vec2(width, TEXT_H + ROWS as f32 * PITCH + 1.0), egui::Sense::hover());
+    let painter = ui.painter_at(cell);
+    painter.text(
+        cell.left_top(),
+        egui::Align2::LEFT_TOP,
+        progress_text(it),
+        egui::FontId::proportional(11.0),
+        theme::TEXT,
+    );
+    let rect = egui::Rect::from_min_max(cell.min + egui::vec2(0.0, TEXT_H), cell.max);
+    let parts = display_parts(it);
+    let cols = ((rect.width() + PITCH - DOT) / PITCH).floor().max(1.0) as usize;
+    let blocks = (cols * ROWS) as u64;
+    let size = it.size.max(1);
+    let empty = theme::BG3;
+    for b in 0..blocks {
+        let lo = size * b / blocks;
+        let hi = (size * (b + 1) / blocks).max(lo + 1);
+        let got = covered(&parts, lo, hi);
+        let color = if got >= hi - lo {
+            ACCENT
+        } else if got > 0 {
+            theme::ACCENT_DIM
+        } else {
+            empty
+        };
+        let (col, row) = (b as usize / ROWS, b as usize % ROWS);
+        let min = rect.min + egui::vec2(col as f32 * PITCH, row as f32 * PITCH);
+        painter.rect_filled(egui::Rect::from_min_size(min, egui::vec2(DOT, DOT)), 1.0, color);
+    }
+    parts_tooltip(resp, &parts);
 }
