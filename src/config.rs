@@ -261,12 +261,33 @@ impl ExistsAction {
     }
 }
 
+/// How the progress of an active transfer is drawn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum ProgressStyle {
+    /// A bar with one stretch per connection.
+    Bar,
+    /// A grid of dots, one per block of the file, lit as blocks arrive.
+    #[default]
+    Dots,
+}
+
+impl ProgressStyle {
+    pub const ALL: [ProgressStyle; 2] = [ProgressStyle::Bar, ProgressStyle::Dots];
+    pub fn label(self) -> &'static str {
+        match self {
+            ProgressStyle::Bar => "Полоса по частям",
+            ProgressStyle::Dots => "Точки (блоки файла)",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
     pub max_transfers: usize,
     /// Connections per large file (segmented transfer), 1 = off.
     pub segments: usize,
+    pub progress_style: ProgressStyle,
     pub exists_action: ExistsAction,
     pub show_hidden_local: bool,
     pub last_local_dir: String,
@@ -287,6 +308,7 @@ impl Default for Settings {
         Self {
             max_transfers: 2,
             segments: 4,
+            progress_style: ProgressStyle::default(),
             exists_action: ExistsAction::Ask,
             show_hidden_local: false,
             last_local_dir: String::new(),

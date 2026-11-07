@@ -53,6 +53,15 @@ pub struct Item {
     pub finished: Option<Instant>,
     /// Bytes skipped thanks to resume; excluded from speed calculation.
     pub resumed_from: u64,
+    /// Ranges of a segmented transfer, one per connection, for the progress bar.
+    pub parts: Vec<Part>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Part {
+    pub start: u64,
+    pub end: u64,
+    pub pos: u64,
 }
 
 impl Item {
@@ -144,6 +153,7 @@ impl TransferManager {
                     started: None,
                     finished: None,
                     resumed_from: 0,
+                    parts: Vec::new(),
                 });
             }
         }
@@ -210,6 +220,7 @@ impl TransferManager {
                 it.cancel = Arc::new(AtomicBool::new(false));
                 it.started = None;
                 it.finished = None;
+                it.parts.clear();
             }
         }
         self.ensure_workers();
@@ -390,6 +401,7 @@ impl TransferManager {
                     started: None,
                     finished: None,
                     resumed_from: 0,
+                    parts: Vec::new(),
                 });
             }
             q.items.splice(pos..pos, new_items);
@@ -616,9 +628,12 @@ impl TransferManager {
                     (true, Direction::Download) => u64::MAX,
                     (true, Direction::Upload) => size,
                 };
-                Segment { start, end, pos: AtomicU64::new(start), done: AtomicBool::new(false) }
+                Segment { idx: i, start, end, pos: AtomicU64::new(start), done: AtomicBool::new(false) }
             })
             .collect();
+        self.update(item.id, |it| {
+            it.parts = segs.iter().map(|s| Part { start: s.start, end: s.end.min(size), pos: s.start }).collect();
+        });
         let abort = AtomicBool::new(false);
         self.notify.send(AppEvent::Log(
             LogLevel::Info,
@@ -684,6 +699,15 @@ impl TransferManager {
         result
     }
 
+    fn advance(&self, id: u64, part: usize, n: u64) {
+        self.update(id, |it| {
+            it.transferred += n;
+            if let Some(p) = it.parts.get_mut(part) {
+                p.pos += n;
+            }
+        });
+    }
+
     fn segment_warning(&self, i: usize, e: &anyhow::Error) {
         self.notify.send(AppEvent::Log(
             LogLevel::Info,
@@ -706,7 +730,7 @@ impl TransferManager {
                     .open(job.local)
                     .with_context(|| format!("не удалось открыть {}", job.local.display()))?;
                 file.seek(SeekFrom::Start(pos))?;
-                let mut w = RangeWriter { file, seg, full: false, report: |n| self.update(id, |it| it.transferred += n) };
+                let mut w = RangeWriter { file, seg, full: false, report: |n| self.advance(id, seg.idx, n) };
                 let r = fs.download(job.remote, pos, &mut w, &mut |_| !stop());
                 // Reaching the end of the range aborts the stream on purpose.
                 if r.is_err() && !w.full {
@@ -723,7 +747,7 @@ impl TransferManager {
                 let mut input = file.take(seg.end - pos);
                 fs.upload_at(job.remote, pos, &mut input, &mut |n| {
                     seg.pos.fetch_add(n, Ordering::Relaxed);
-                    self.update(id, |it| it.transferred += n);
+                    self.advance(id, seg.idx, n);
                     !stop()
                 })?;
                 if seg.pos.load(Ordering::Relaxed) < seg.end {
@@ -749,13 +773,14 @@ struct Job<'a> {
 
 /// A byte range of a segmented transfer; `pos` is how far it got.
 struct Segment {
+    idx: usize,
     start: u64,
     end: u64,
     pos: AtomicU64,
     done: AtomicBool,
 }
 
-fn threads(n: usize) -> String {
+pub fn threads(n: usize) -> String {
     match n % 10 {
         1 if n % 100 != 11 => format!("{n} поток"),
         2..=4 if !(12..=14).contains(&(n % 100)) => format!("{n} потока"),
