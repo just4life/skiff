@@ -629,7 +629,7 @@ impl TransferManager {
             for (i, seg) in segs.iter().enumerate().skip(1) {
                 let me = self.clone();
                 let abort = &abort;
-                std::thread::Builder::new()
+                let spawned = std::thread::Builder::new()
                     .name(format!("segment-{i}"))
                     .spawn_scoped(s, move || {
                         if abort.load(Ordering::Relaxed) || item.cancel.load(Ordering::Relaxed) {
@@ -645,8 +645,11 @@ impl TransferManager {
                             }
                             Err(e) => me.segment_warning(i, &e),
                         }
-                    })
-                    .expect("spawn segment thread");
+                    });
+                // No thread for this range: the worker's connection finishes it below.
+                if let Err(e) = spawned {
+                    self.segment_warning(i, &e.into());
+                }
             }
             let r = self.run_segment(item, fs, job, &segs[0], &abort);
             if r.is_err() {
