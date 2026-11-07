@@ -116,6 +116,7 @@ impl App {
             trust.clone(),
             notify.clone(),
             settings.max_transfers,
+            settings.segments,
             settings.exists_action,
         );
 

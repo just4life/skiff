@@ -43,6 +43,20 @@ pub trait RemoteFs: Send {
     /// Upload `input` to `path`; when `offset > 0` the remote file is appended to.
     fn upload(&mut self, path: &str, offset: u64, input: &mut dyn Read, progress: Progress)
     -> Result<()>;
+    /// Whether several ranges of one file can be written in parallel with
+    /// [`RemoteFs::upload_at`] (segmented upload). FTP has no such command.
+    fn can_upload_ranges(&self) -> bool {
+        false
+    }
+    /// Write `input` into `path` starting at `offset` without truncating the
+    /// file; used by segmented uploads, one range per connection.
+    fn upload_at(&mut self, _path: &str, _offset: u64, _input: &mut dyn Read, _progress: Progress) -> Result<()> {
+        anyhow::bail!("Протокол не поддерживает запись по смещению")
+    }
+    /// Create `path` if needed and set its size (truncate or extend).
+    fn set_size(&mut self, _path: &str, _size: u64) -> Result<()> {
+        anyhow::bail!("Протокол не поддерживает изменение размера файла")
+    }
     /// Cheap liveness check (NOOP / stat).
     fn keepalive(&mut self) -> Result<()>;
     fn close(&mut self);
