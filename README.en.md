@@ -26,7 +26,7 @@
 - **Site manager:** groups, search, duplicate, autosave, and **import of FileZilla's `sitemanager.xml`**.
 - **Quickconnect** that remembers its fields and accepts URLs like `sftp://user@host:2222/path`.
 - **Dual panes:** sortable columns, natural sort, filter, history, multi-select, context menu, hotkeys.
-- **Transfers:** drag and drop between panes (and from the OS file manager), recursive folders, a queue with progress and speed, pause, cancel, retry, and **N parallel workers**, each with its own connection.
+- **Transfers:** drag and drop between panes (and from the OS file manager), recursive folders, a queue with progress and speed, pause, cancel, retry, and **N parallel workers**, each with its own connection. Large files (16 MB and up) are split into ranges and moved over several connections at once (download over FTP/FTPS/SFTP, upload over SFTP).
 - **File exists:** ask / overwrite / if newer / resume (REST/APPE, SFTP seek) / rename / skip, with "apply to all".
 - **Robust:** keep-alive, automatic reconnect, PASV NAT workaround, EPSV for IPv6, MLSD with LIST fallback, UTF-8.
 

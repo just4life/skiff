@@ -265,6 +265,8 @@ impl ExistsAction {
 #[serde(default)]
 pub struct Settings {
     pub max_transfers: usize,
+    /// Connections per large file (segmented transfer), 1 = off.
+    pub segments: usize,
     pub exists_action: ExistsAction,
     pub show_hidden_local: bool,
     pub last_local_dir: String,
@@ -284,6 +286,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             max_transfers: 2,
+            segments: 4,
             exists_action: ExistsAction::Ask,
             show_hidden_local: false,
             last_local_dir: String::new(),

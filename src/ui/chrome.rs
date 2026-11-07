@@ -8,7 +8,7 @@ use crate::config::{ExistsAction, Protocol};
 use crate::events::ExistsAnswer;
 use crate::remote::LogLevel;
 use crate::theme::{self, ACCENT, BG2, TEXT_WEAK};
-use crate::transfer::{Direction, Status};
+use crate::transfer::{Direction, MAX_SEGMENTS, Status};
 use crate::trust::{TrustDecision, TrustKind};
 use crate::ui::pane::Side;
 use crate::ui::site_manager::SiteManager;
@@ -552,6 +552,17 @@ impl App {
                         ui.label("Одновременных передач");
                         if ui.add(egui::DragValue::new(&mut self.settings.max_transfers).range(1..=10)).changed() {
                             self.transfers.queue.lock().unwrap().max_workers = self.settings.max_transfers;
+                        }
+                        ui.end_row();
+                        ui.label("Потоков на один файл").on_hover_text(
+                            "Большие файлы (от 16 МБ) качаются по частям через несколько соединений. \
+                             Загрузка на сервер по частям работает только по SFTP. 1 — выключено.",
+                        );
+                        if ui
+                            .add(egui::DragValue::new(&mut self.settings.segments).range(1..=MAX_SEGMENTS))
+                            .changed()
+                        {
+                            self.transfers.queue.lock().unwrap().segments = self.settings.segments;
                         }
                         ui.end_row();
                         ui.label("Скрытые локальные файлы");

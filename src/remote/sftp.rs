@@ -178,6 +178,42 @@ impl SftpFs {
 
         Ok(Self { rt, session, sftp, log })
     }
+
+    /// Write `input` at `offset`; `truncate` drops whatever the file held.
+    fn put(&mut self, path: &str, offset: u64, truncate: bool, input: &mut dyn Read, progress: Progress) -> Result<()> {
+        if offset > 0 {
+            (self.log)(LogLevel::Command, format!("PUT {path} @ {offset}"));
+        } else {
+            (self.log)(LogLevel::Command, format!("PUT {path}"));
+        }
+        let sftp = &self.sftp;
+        self.rt.block_on(async {
+            let flags = if !truncate {
+                OpenFlags::WRITE | OpenFlags::CREATE
+            } else {
+                OpenFlags::WRITE | OpenFlags::CREATE | OpenFlags::TRUNCATE
+            };
+            let mut file = sftp.open_with_flags(path, flags).await.map_err(sftp_err)?;
+            if offset > 0 {
+                file.seek(std::io::SeekFrom::Start(offset)).await?;
+            }
+            let mut buf = vec![0u8; BUF];
+            loop {
+                let n = input.read(&mut buf)?;
+                if n == 0 {
+                    break;
+                }
+                file.write_all(&buf[..n]).await?;
+                if !progress(n as u64) {
+                    let _ = file.shutdown().await;
+                    anyhow::bail!("Передача отменена");
+                }
+            }
+            file.flush().await?;
+            file.shutdown().await?;
+            Ok(())
+        })
+    }
 }
 
 impl RemoteFs for SftpFs {
@@ -280,32 +316,28 @@ impl RemoteFs for SftpFs {
         input: &mut dyn Read,
         progress: Progress,
     ) -> Result<()> {
-        (self.log)(LogLevel::Command, format!("PUT {path}"));
+        self.put(path, offset, offset == 0, input, progress)
+    }
+
+    fn can_upload_ranges(&self) -> bool {
+        true
+    }
+
+    fn upload_at(&mut self, path: &str, offset: u64, input: &mut dyn Read, progress: Progress) -> Result<()> {
+        self.put(path, offset, false, input, progress)
+    }
+
+    fn set_size(&mut self, path: &str, size: u64) -> Result<()> {
+        (self.log)(LogLevel::Command, format!("SETSTAT {path} size={size}"));
         let sftp = &self.sftp;
         self.rt.block_on(async {
-            let flags = if offset > 0 {
-                OpenFlags::WRITE | OpenFlags::CREATE
-            } else {
-                OpenFlags::WRITE | OpenFlags::CREATE | OpenFlags::TRUNCATE
-            };
-            let mut file = sftp.open_with_flags(path, flags).await.map_err(sftp_err)?;
-            if offset > 0 {
-                file.seek(std::io::SeekFrom::Start(offset)).await?;
-            }
-            let mut buf = vec![0u8; BUF];
-            loop {
-                let n = input.read(&mut buf)?;
-                if n == 0 {
-                    break;
-                }
-                file.write_all(&buf[..n]).await?;
-                if !progress(n as u64) {
-                    let _ = file.shutdown().await;
-                    anyhow::bail!("Передача отменена");
-                }
-            }
-            file.flush().await?;
-            file.shutdown().await?;
+            let file = sftp
+                .open_with_flags(path, OpenFlags::WRITE | OpenFlags::CREATE)
+                .await
+                .map_err(sftp_err)?;
+            let attrs = FileAttributes { size: Some(size), ..Default::default() };
+            file.set_metadata(attrs).await.map_err(sftp_err)?;
+            let _ = file.close().await;
             Ok(())
         })
     }
